@@ -1,0 +1,2 @@
+# No third-party Python packages required — stdlib only (urllib for the
+# OpenAI-compatible LLM API).

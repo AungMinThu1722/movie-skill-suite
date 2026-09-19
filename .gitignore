@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# skill work dirs (created at runtime, always cleaned up)
+.work/
+.work_audio/
+
+# OS
+.DS_Store
+
+# secrets — never commit keys
+*.env
+*.key
+cookies*.txt

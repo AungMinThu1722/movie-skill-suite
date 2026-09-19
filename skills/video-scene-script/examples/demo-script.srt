@@ -1,0 +1,15 @@
+1
+00:00:00,000 --> 00:01:00,000
+SMPTE color bars, grey square at left; thin colored lines drift across frame
+
+2
+00:01:00,000 --> 00:02:00,000
+cut to static SMPTE bars; large rainbow disc right, rainbow strip lower third; no movement
+
+3
+00:02:00,000 --> 00:03:00,000
+classic vertical color bars over black lower region; frame holds still
+
+4
+00:03:00,000 --> 00:03:30,000
+single solid purple frame; ends on this hold
