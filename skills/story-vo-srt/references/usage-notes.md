@@ -1,66 +1,87 @@
-# Story VO SRT — Design & LLM Usage Notes (for the agent)
+# Story VO SRT — Design and LLM Usage Notes
 
-## What this skill is
+## What this skill does
 
-Merges the two sibling skills' outputs — the **video scene script** SRT
-(visual phrases, ~1/minute) and the **audio** SRT (AssemblyAI subtitles,
-word-timed) — into a single **TTS-ready voice-over story script**
-(`<Title> VO.srt`), in the movie's original language, storyteller style.
-The first ~10 s are replaced by a generated HOOK (gripping story teaser).
+The skill consumes two SRTs from any session:
 
-## LLM API (OpenAI-compatible, e.g. OpenRouter)
+- **video scene script:** visual evidence and important scene beats;
+- **audio dialogue SRT:** word-timed spoken events.
 
-Config resolution: env vars → `~/.llm_env` → `--base/--key/--model` flags:
+It produces a **Burmese TTS-ready storyteller SRT**. It does not copy the
+source SRTs as a transcript. Every dialogue event is required in the story
+pass, but adjacent dialogue may be paraphrased and grouped. Scene-only events
+are optional, concise context because the editor may remove those stretches.
+
+## Burmese TTS calibration
+
+The reference AMTrecap local skill calibrates Burmese narration at:
+
+- minimum: **20 Unicode codepoints/second**;
+- maximum: **24 Unicode codepoints/second**;
+- default duration target: **21.6 codepoints/second**.
+
+The implementation uses Python `len(text)` after TTS cleanup. It never uses
+UTF-8 byte counts. The model receives each dialogue event's available VO
+window and character range, and `story_srt.py` calculates explicit SRT end
+times from the final text length and target CPS.
+
+Useful overrides:
+
+```bash
+python3 scripts/story_srt.py \
+    --cps-min 20 --cps-max 24 --cps-target 21.6
+```
+
+The defaults are calibrated for Burmese. Use different CPS values only when
+the selected TTS voice is not Burmese.
+
+## LLM API
+
+Config resolution: environment variables → `~/.llm_env` → CLI flags:
+
 - `LLM_API_BASE` (default `https://openrouter.ai/api/v1`)
 - `LLM_API_KEY`
 - `LLM_MODEL`
 
-Call shape: `POST {base}/chat/completions`, `Authorization: Bearer <key>`,
-optional OpenRouter headers `HTTP-Referer` / `X-Title` (set by the script).
+Calls use `POST {base}/chat/completions` with an OpenAI-compatible payload.
+Free-tier models run sequentially by default and retry transient 429/network
+errors; 401/402/403 errors fail fast.
 
-Free-tier notes (OpenRouter `:free` models):
-- ~20 req/min, daily request caps; the script retries 429 with 30 s backoff
-  (up to 6 attempts) and runs chunks SEQUENTIALLY by default
-  (`--parallel 1`). Don't raise `--parallel` on free keys.
-- Free models can be slow: per-call timeout is 300 s — be patient, don't
-  kill the run early.
-- 401/402/403 fail fast (bad key / billing) — tell the user, don't retry.
+## Why the pipeline has two LLM passes
 
-Current model: `inclusionai/ling-3.0-flash-fin:free` (strong at Chinese;
-adequate at English). If the user switches models, only `~/.llm_env`
-changes.
+- **Chunk pass:** each 10-minute chunk sees source dialogue/scene IDs, Burmese
+  character budgets, and continuity state. It must cover every dialogue ID,
+  while ordinary scene-only beats may be omitted.
+- **Consolidation pass:** character names and phrasing are unified across
+  chunks. It retains all required dialogue IDs, keeps only useful scene beats,
+  and writes the Burmese hook.
+- **Mechanical assembly:** IDs map back to original source anchors. The LLM
+  never types timestamps. SRT durations are calculated from `len(text)` and
+  the CPS target, overlapping dialogue beats are grouped, and optional scene
+  beats that collide with required dialogue are dropped.
 
-## Why quality holds up (architecture)
+## Fallbacks and verification
 
-- **Timestamps are never written by the LLM.** merge_timeline.py assigns
-  event IDs with the original SRT timestamps; the LLM only references IDs;
-  story_srt.py maps ID → original time mechanically. The verify report
-  checks every dialogue event is covered (auto-fallback fills gaps with
-  the original line, flagged in `fallback_lines`).
-- **Chunk + consolidate.** 10-minute chunks keep each call focused; the
-  final consolidation pass unifies naming/flow across the whole film and
-  writes the HOOK only after the whole story is known.
-- **Resumable.** Each chunk's output is saved as `.work/story/part_NN.json`;
-  reruns skip finished chunks (`--force` redoes).
-- **Retries + fallbacks** mean a flaky free-tier call degrades to the
-  original line instead of breaking the run.
+If the model misses a dialogue ID, the script makes a small repair call. If
+that repair also fails, the original source line is inserted as a marked raw
+fallback so a spoken beat is never silently lost. The final `verify.json` and
+stdout JSON report:
 
-## Practical limits
+- dialogue total and coverage percentage;
+- raw fallback count;
+- Burmese output language;
+- narration characters and estimated speech seconds;
+- effective CPS and timing violations;
+- optional scene lines kept/skipped;
+- hook length and whether it fits its opening window.
 
-- ~90 min films are comfortable for a single consolidation call; longer:
-  run per half and concatenate with the sibling skills' merge tooling, or
-  raise `--max-tokens-consolidate`.
-- Very sparse scene-script input (e.g. only 2 entries) still works — scene
-  events are context, dialogue carries the story.
+A non-zero exit indicates missing dialogue coverage, an unrepaired raw
+fallback, a timing violation, or a hook that does not fit its opening window;
+the SRT/report are still left in place for inspection.
 
 ## Standalone contract
 
-- Accepts the two SRTs from ANY session: explicit paths or `--title`
-  auto-discovery (structure-based classification: ~1 entry/minute = scene
-  script; many 2-10 s entries = audio).
-- Naming-collision note: both sibling skills default to `<Movie Name>.srt`
-  in the same folder. If both ran in one workspace, one overwrote the
-  other — keep distinct names (e.g. `<Name> scene.srt` / `<Name> audio.srt`)
-  or pass explicit paths.
-- Cleanup: after the run, `rm -rf .work`; only skill folders + output SRTs
-  remain. Input files are never modified.
+Inputs are explicit paths or auto-discovered by `resolve_inputs.py`; the input
+format remains this suite's scene SRT + audio SRT, not the AMTrecap local
+skill's visual-timeline format. Keep the two sibling SRTs under distinct names
+when they share a folder. Temporary `.work` data is removed after delivery.

@@ -1,61 +1,77 @@
-"""srtutil.py — shared SRT parsing / formatting helpers (stdlib only)."""
+"""srtutil.py — shared SRT parsing, formatting, and TTS helpers."""
 
 import re
 from pathlib import Path
 
 TS_RE = re.compile(
     r"^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*"
-    r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})$")
+    r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})$"
+)
 
 
-def ts(t: float) -> str:
-    ms = max(0, int(round(t * 1000)))
-    h, ms = divmod(ms, 3_600_000)
-    m, ms = divmod(ms, 60_000)
-    s, ms = divmod(ms, 1_000)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+def ts(seconds: float) -> str:
+    milliseconds = max(0, int(round(float(seconds) * 1000)))
+    hours, milliseconds = divmod(milliseconds, 3_600_000)
+    minutes, milliseconds = divmod(milliseconds, 60_000)
+    seconds, milliseconds = divmod(milliseconds, 1_000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
 
 
 def parse_srt(path) -> list:
-    """Returns [{start, end, text}, ...] sorted by start time."""
+    """Return [{start, end, text}, ...] sorted by start time."""
     raw = Path(path).read_text(encoding="utf-8-sig")
     entries = []
     for block in re.split(r"\n\s*\n", raw.strip()):
-        lines = [ln for ln in block.splitlines() if ln.strip()]
+        lines = [line for line in block.splitlines() if line.strip()]
         if len(lines) < 2:
             continue
-        m = TS_RE.match(lines[1].strip())
-        if not m:
+        match = TS_RE.match(lines[1].strip())
+        if not match:
             continue
-        g = list(map(int, m.groups()))
-        start = g[0] * 3600 + g[1] * 60 + g[2] + g[3] / 1000
-        end = g[4] * 3600 + g[5] * 60 + g[6] + g[7] / 1000
+        values = list(map(int, match.groups()))
+        start = values[0] * 3600 + values[1] * 60 + values[2] + values[3] / 1000
+        end = values[4] * 3600 + values[5] * 60 + values[6] + values[7] / 1000
         text = " ".join(" ".join(lines[2:]).split())
-        if text:
+        if text and end > start:
             entries.append({"start": start, "end": end, "text": text})
-    entries.sort(key=lambda e: (e["start"], e["end"]))
+    entries.sort(key=lambda entry: (entry["start"], entry["end"]))
     return entries
 
 
 def write_srt(entries, out_path) -> None:
-    """entries: [(start, text), ...] — duration = gap to next entry start."""
+    """Write explicit (start, end, text) entries as an SRT.
+
+    The legacy two-tuple form (start, text) is still accepted for callers
+    outside this skill; its end is the next entry's start or start+5 seconds.
+    Story VO now uses explicit TTS-calculated ends.
+    """
+    normalized = []
+    for index, entry in enumerate(entries):
+        if len(entry) == 3:
+            start, end, text = entry
+        elif len(entry) == 2:
+            start, text = entry
+            end = entries[index + 1][0] if index + 1 < len(entries) else start + 5.0
+        else:
+            raise ValueError("SRT entry must be (start, text) or (start, end, text)")
+        start = float(start)
+        end = max(start + 0.001, float(end))
+        normalized.append((start, end, str(text)))
+
     blocks = []
-    for i, (start, text) in enumerate(entries, 1):
-        end = entries[i][0] if i < len(entries) else start + 5.0
-        if end <= start:
-            end = start + 1.0
-        blocks.append(f"{i}\n{ts(start)} --> {ts(end)}\n{text}\n")
-    Path(out_path).write_text("".join(blocks), encoding="utf-8")
+    for index, (start, end, text) in enumerate(normalized, 1):
+        blocks.append(f"{index}\n{ts(start)} --> {ts(end)}\n{text}\n")
+    Path(out_path).write_text("\n".join(blocks), encoding="utf-8")
 
 
 def guess_lang(text: str) -> str:
-    """Rough script detection over a sample of text."""
-    cjk = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
-    mym = sum(1 for c in text if "\u1000" <= c <= "\u109f")
+    """Rough source-script detection over a sample of text."""
+    cjk = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
+    burmese = sum(1 for char in text if "\u1000" <= char <= "\u109f")
     total = max(1, len(text))
     if cjk / total > 0.08:
         return "zh (Chinese)"
-    if mym / total > 0.08:
+    if burmese / total > 0.08:
         return "my (Burmese)"
     if re.search(r"[\u0e00-\u0e7f]", text):
         return "th (Thai)"
@@ -73,10 +89,15 @@ def guess_lang(text: str) -> str:
 
 
 def tts_clean(text: str) -> str:
-    """Backstop cleanup for TTS-ready lines."""
-    t = re.sub(r"\[(E\d{3,6})\]", "", text)          # event ids
-    t = re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27bf]", "", t)  # emoji
-    t = re.sub(r"\{[^}]*\}", "", t)                   # stage braces
-    t = t.replace("…", " ").replace("——", " ")
-    t = re.sub(r"\s+", " ", t).strip()
-    return t
+    """Backstop cleanup for plain TTS-ready text."""
+    cleaned = re.sub(r"\[(?:E\d{3,6})(?:\s*,\s*E\d{3,6})*\]", "", text)
+    cleaned = re.sub(r"[\U0001F000-\U0001FAFF\u2600-\u27bf]", "", cleaned)
+    cleaned = re.sub(r"\{[^}]*\}", "", cleaned)
+    cleaned = cleaned.replace("…", " ").replace("——", " ")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def unicode_chars(text: str) -> int:
+    """The AMTrecap calibration count: Python Unicode codepoints."""
+    return len(text)

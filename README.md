@@ -33,7 +33,7 @@ run book). They can also run independently:
 |---|---|---|---|
 | `skills/audio-srt` | video/audio URL or local file | `<Name>.srt` — spoken subtitles, original language and timestamps | ffmpeg, yt-dlp, AssemblyAI key |
 | `skills/video-scene-script` | video URL or local file, optionally audio SRT | `<Name>.srt` — per-minute visual script, original language | ffmpeg, ffprobe, yt-dlp |
-| `skills/story-vo-srt` | audio SRT + visual scene SRT | `<Name> VO.srt` — TTS-ready storyteller narration | OpenAI-compatible LLM key |
+| `skills/story-vo-srt` | audio SRT + visual scene SRT | `<Name> VO.srt` — Burmese TTS-ready storyteller narration (20–24 Unicode chars/sec) | OpenAI-compatible LLM key |
 
 ## Recommended flow
 
@@ -45,8 +45,11 @@ run book). They can also run independently:
    `gap-uniform`/`gap-scene` frames, detects hard cuts, and deduplicates
    near-identical thumbnails. Videos over 15 minutes are automatically split
    into part folders for delegation.
-3. Run `story-vo-srt` on both SRTs. It uses `[dialogue]` for spoken words and
-   `[scene]` for visible events, then produces a flowing narration and hook.
+3. Run `story-vo-srt` on both SRTs. It rewrites them as natural Burmese
+   narrator speech: every dialogue beat is covered by paraphrase/attribution,
+   while ordinary scene-only beats stay brief or may be omitted. Burmese TTS
+   timing is calculated at 20–24 Unicode characters per second, with a 21.6
+   CPS default target.
 
 If AssemblyAI is unavailable or there is no key, skip step 1: run the visual
 skill without `--audio-srt` for a pure-visual scene script. The story skill
@@ -105,6 +108,7 @@ SRTs under distinct names when audio and visual outputs share a directory
   `dialogue.txt` for context, but do not copy the full audio SRT into visual
   entries.
 - `story-vo-srt` uses an OpenAI-compatible chat API (OpenRouter, OpenAI,
-  DeepSeek, Gemini-compatible, local Ollama, and similar providers).
+  DeepSeek, Gemini-compatible, local Ollama, and similar providers) and
+  calculates Burmese voice-over timing from Python Unicode-character counts.
 - Public RedNote/Xiaohongshu links are handled by the built-in fetchers;
   login-protected sources need a Netscape-format cookies file.
