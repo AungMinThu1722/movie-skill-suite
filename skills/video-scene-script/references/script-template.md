@@ -1,9 +1,10 @@
 # Per-Minute Script Text (script.txt) — Format & Style
 
-`script.txt` (or `script_partN.txt` for chunked runs) is the ONLY thing you
-write. `make_srt.py` turns it into SRT, so add no numbers or timestamps.
+`script.txt` (or `script_partN.txt` for delegated part runs) is the ONLY
+thing you write. `make_srt.py` turns it into SRT, so add no numbers or
+timestamps.
 
-## Format — ONE LINE PER SEGMENT
+## Format — ONE LINE PER SEGMENT (minute)
 
 ```
 # language: zh
@@ -14,16 +15,16 @@ grey-suit man: open-mouth shouting face, points at sign; sign reads "CLOSED"
 
 - **Each non-empty line = exactly one segment entry**, in time order.
   Keep each entry to a single line (short phrases).
-- Line count must match the segment count the script printed
-  (`processing A-B`).
-- For chunked runs: part N's file contains exactly the lines for its
-  segment range — no more, no less.
+- Line count must match the segment count in your `manifest.json`
+  (`range` — the frames script prints it too).
+- For delegated part runs: part N's file contains exactly the lines for
+  its segment range — no more, no less.
 - First line is a comment: `# language: <code>`. Blank lines and `#` lines
-  are ignored (use them freely to separate chunks while writing).
+  are ignored (use them freely to separate parts while writing).
 
 ## Style (phrase-based — NOT subtitles)
 
-- **Short phrases / sentence fragments, present tense**, joined by `;`/``,``.
+- **Short phrases / sentence fragments, present tense**, joined by `;`/`,`.
   Telegraphic: `market street; grey-suit man stops at shuttered shop`.
 - **1–3 phrases per minute.** Static content = one phrase; do not pad.
 - No "we see / there is / the camera shows". No dialogue, no audio, no
@@ -37,9 +38,9 @@ grey-suit man: open-mouth shouting face, points at sign; sign reads "CLOSED"
 - **Scene changes inside a minute:** `cut to kitchen` / `cut to street`.
 - **On-screen text:** quote verbatim in its original language:
   `sign reads "CLOSED"`.
-- **Unclear cells:** one hedge phrase (`unclear` / movie-language
+- **Unclear frames:** one hedge phrase (`unclear` / movie-language
   equivalent) — never guess.
-- Full analysis rules (what to look for per cell): `vision-prompt.md`.
+- Full analysis rules (what to look for per frame): `vision-prompt.md`.
 
 ## Language
 

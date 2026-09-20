@@ -10,12 +10,10 @@ Checks / repairs:
   1. ffmpeg + ffprobe : if missing, downloads a static build into
      ~/.local/ffmpeg-static and symlinks it into ~/.local/bin
   2. yt-dlp           : pip install if missing
-  3. Pillow           : pip install if missing (needed for labeled grids;
-                        the pipeline degrades to unlabeled grids without it)
 
 Prints ONE JSON object on stdout:
   {"ok": true, "ffmpeg": "7.0.2", "ffprobe": "7.0.2", "yt_dlp": "2026.x",
-   "pillow": "12.x", "path_add": ["/home/user/.local/bin"], "installed": []}
+   "path_add": ["/home/user/.local/bin"], "installed": []}
 
 `installed` lists what was fetched this run; `path_add` are directories the
 caller should prepend to PATH before running the other pipeline scripts.
@@ -125,25 +123,15 @@ def ensure_ytdlp() -> str:
     print("NOTE: yt-dlp missing — pip installing ...", file=sys.stderr)
     r = run([sys.executable, "-m", "pip", "install", "-q", "yt-dlp"])
     if r.returncode != 0:
+        # PEP 668 (externally managed environment, e.g. Debian 12+/Ubuntu 23+)
+        r = run([sys.executable, "-m", "pip", "install", "-q",
+                 "--break-system-packages", "yt-dlp"])
+    if r.returncode != 0:
         raise RuntimeError(f"yt-dlp install failed: {r.stderr.strip()[-300:]}")
     installed.append("yt-dlp")
     if shutil.which("yt-dlp"):
         return "yt-dlp"
     return f"{sys.executable} -m yt_dlp"
-
-
-def ensure_pillow() -> str:
-    r = run([sys.executable, "-c", "import PIL; print(PIL.__version__)"])
-    if r.returncode == 0:
-        return r.stdout.strip()
-    print("NOTE: Pillow missing — pip installing (labeled grids need it) ...",
-          file=sys.stderr)
-    r = run([sys.executable, "-m", "pip", "install", "-q", "Pillow"])
-    if r.returncode != 0:
-        raise RuntimeError(f"Pillow install failed: {r.stderr.strip()[-300:]}")
-    installed.append("Pillow")
-    r = run([sys.executable, "-c", "import PIL; print(PIL.__version__)"])
-    return r.stdout.strip()
 
 
 def main() -> int:
@@ -153,7 +141,6 @@ def main() -> int:
         ff, fp = ensure_ffmpeg(bin_dir)
         ff_ver, fp_ver = version_of(ff), version_of(fp)
         ytdlp = ensure_ytdlp()
-        pillow = ensure_pillow()
     except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         print(json.dumps({"ok": False, "error": str(e)}))
@@ -165,7 +152,6 @@ def main() -> int:
         "ffmpeg": ff_ver,
         "ffprobe": fp_ver,
         "yt_dlp": ytdlp,
-        "pillow": pillow,
         "path_add": path_add,
         "installed": installed,
     }

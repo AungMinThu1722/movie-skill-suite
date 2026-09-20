@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 """
-make_srt.py — merge per-segment script text into a properly formatted .srt.
+make_srt.py — merge per-minute script text into a properly formatted .srt.
 
 Usage:
   python3 make_srt.py <manifest.json> <script.txt> --out "Movie Name.srt"
   python3 make_srt.py manifest.json script.txt --out out.srt --bom
 
 Input format (script.txt):
-  - ONE LINE PER SEGMENT, in manifest (time) order. Each line is one
-    phrase entry for one segment (short phrases — keep it to one line).
+  - ONE LINE PER SEGMENT (minute), in manifest (time) order. Each line is
+    one phrase entry for one segment (short phrases — keep it to one line).
   - Blank lines and lines starting with '#' are ignored — use them for
     metadata such as '# language: ja' (the movie's original language the
     text is written in).
   - The LLM writes ONLY the entry text. All SRT numbering and
     timestamps are generated here from manifest.json, so timestamps can
     never be hand-typed or wrong.
+
+Manifest: the manifest.json written by make_frames.py (its "segments"
+list carries each segment's exact start/end seconds; a legacy "grids"
+key is still accepted).
 
 Output: a UTF-8 .srt file with one entry per segment
 (00:00:00,000 --> 00:01:00,000 style).
@@ -49,7 +53,7 @@ def read_paragraphs(path: Path) -> list:
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("manifest", help="manifest.json from make_grids.py")
+    ap.add_argument("manifest", help="manifest.json from make_frames.py")
     ap.add_argument("script_text", help="script.txt with one paragraph per segment")
     ap.add_argument("--out", required=True, help='output .srt path (e.g. "Movie Name.srt")')
     ap.add_argument("--bom", action="store_true",
@@ -57,7 +61,7 @@ def main() -> int:
     args = ap.parse_args()
 
     man = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
-    segs = man.get("grids", [])
+    segs = man.get("segments") or man.get("grids") or []
     if not segs:
         print("ERROR: manifest has no segments", file=sys.stderr)
         return 1

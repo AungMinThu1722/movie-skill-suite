@@ -7,7 +7,7 @@ SRT deliverables, built for any agent that loads `SKILL.md`-based skills
 ```
                     ┌──────────────────────────┐
  YouTube / RedNote  │  1 · video-scene-script  │  vision → scene script
- (link or file) ───▶│     (3×3 frame grids)    │  → "<Name>.srt"  (per-minute
+ (link or file) ───▶│   (frames one-by-one)    │  → "<Name>.srt"  (per-minute
                     └────────────┬─────────────┘     phrases, original language
                                  │ video
                     ┌────────────▼─────────────┐
@@ -37,7 +37,7 @@ skill follows the same contract:
 
 | Skill | Input | Output | Needs |
 |---|---|---|---|
-| `skills/video-scene-script` | video URL (YouTube / RedNote / direct) or file | `<Name>.srt` — per-minute visual script, phrase style, original language | ffmpeg, yt-dlp, Pillow |
+| `skills/video-scene-script` | video URL (YouTube / RedNote / direct) or file | `<Name>.srt` — per-minute visual script, phrase style, original language | ffmpeg, yt-dlp |
 | `skills/audio-srt` | media URL or file | `<Name>.srt` — spoken subtitles via AssemblyAI (original language, original timestamps) | ffmpeg, yt-dlp, `assemblyai`, AssemblyAI API key |
 | `skills/story-vo-srt` | the two SRTs above (any session) | `<Name> VO.srt` — TTS-ready storyteller voice-over, generated hook for the opening | LLM API key (OpenAI-compatible, e.g. OpenRouter) |
 
