@@ -1,145 +1,197 @@
 ---
 name: story-vo-srt
-description: Merge a movie's video-scene-script SRT (visual phrases per minute) with its audio SRT (AssemblyAI subtitles) into one TTS-ready voice-over story script "<Title> VO.srt", written in the movie's original language in an engaging storyteller style, with a generated hook replacing the first ~10 seconds. All LLM work is done automatically by scripts calling an OpenAI-compatible LLM API (chunk pass + consolidation pass); the agent ONLY runs the exact scripts, checks their JSON output, and delivers. Works standalone with SRTs from any session (explicit paths or auto-discovery by title). Temp files are cleaned up afterwards. Use when the user has both a scene script and a subtitle SRT for a movie and wants a narrated voice-over script for TTS.
+description: Combine a video-scene-script SRT and an audio dialogue SRT into a natural Burmese storyteller voice-over SRT. Dialogue beats are mandatory but paraphrased and attributed rather than copied as a transcript; ordinary scene-only beats are optional and concise. Uses Burmese TTS pacing of 20–24 Unicode characters per second, calculates explicit narration durations, consolidates character continuity, and generates a hook for the opening.
 ---
 
-# Story VO SRT (TTS-ready voice-over script)
+# Story VO SRT — Burmese TTS Narration
 
-Combine the two inputs —
+Combine the two suite inputs:
 
-- **scene-script SRT** (from `video-scene-script`: visual phrases, ~1 per
-  minute)
-- **audio SRT** (from `audio-srt`: spoken subtitles, word-timed)
+- **scene-script SRT** from `video-scene-script` — visual evidence and
+  important scene beats, usually about one entry per minute;
+- **audio SRT** from `audio-srt` — word-timed spoken dialogue.
 
-— into a single **storyteller voice-over script** (`<Title> VO.srt`) in the
-movie's **original language**, ready to feed into any TTS engine. The first
-~10 s become a generated **hook** (gripping story teaser) that replaces the
-film's opening.
+The result is `<Title> VO.srt`: a natural **Burmese movie-recap narrator**
+script ready for TTS. It is not a book-like transcript and it does not copy
+the input SRTs line by line.
 
-> Sibling skills (do not mix their internals): `video-scene-script`
-> (vision → scene script) and `audio-srt` (AssemblyAI → subtitles). This
-> skill consumes their SRTs, from any session.
+## Content policy
+
+- Every dialogue event must be represented in the generated story. The model
+  may paraphrase its meaning and say who said what; it does not need to repeat
+  every spoken word.
+- Adjacent dialogue events may be grouped into one narrator beat.
+- Scene-only events are optional context. Keep only plot-changing visual
+  beats, write them briefly, or omit ordinary silent scenery. The editor can
+  remove optional scene-only VO without breaking dialogue coverage.
+- The output language is Burmese by default, even when the input dialogue is
+  Chinese or English. Use stable Burmese names/descriptors and do not invent
+  plot facts.
+
+## TTS pacing contract
+
+This skill uses the Burmese calibration from the AMTrecap local reference:
+
+- **20–24 Unicode codepoints per second**;
+- default calculation target **21.6 codepoints/second**;
+- count with Python `len()` after TTS cleanup, never UTF-8 bytes.
+
+Each dialogue event is sent to the LLM with an available VO window and a
+character budget. The final SRT uses explicit end times calculated from the
+narration text length and the target CPS. Overlapping dialogue beats are
+combined; an optional scene-only beat that collides with required dialogue is
+dropped instead of causing timing drift.
 
 ## Agent role — run scripts only
 
-Run the exact commands below, read each JSON line, verify `ok`, move on.
-The LLM story writing happens **inside the scripts** (API calls) — the
-agent writes no story text and edits no SRT. Ask the user only when: no
-inputs found, LLM key missing/failing, or an explicit choice is needed.
+Run the commands below, read each JSON result, and verify `ok`. The LLM story
+writing happens inside `story_srt.py`; the agent does not hand-write the
+narration or SRT timestamps. Ask the user only when an input, LLM key/model,
+or access permission is genuinely missing.
 
 ## Pipeline
 
-Work dir: `.work` (deleted at the end). Output: `<Title> VO.srt` in the
-current folder.
+Temporary work directory: `.work`. Final output: `<Title> VO.srt`.
 
-### 0. Dependency auto-check (MANDATORY — before ANYTHING)
+### 0. Dependency/config check (mandatory)
 
 ```bash
 python3 scripts/check_deps.py --ping
 ```
 
-No system tools and no pip packages are needed (stdlib only) — this checks
-Python + that the LLM API config (base/key/model from env or `~/.llm_env`)
-is resolvable and does a tiny real API ping.
-- `llm_key_set: false` → ask the user for the LLM API key/model, save to
-  `~/.llm_env` (`LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL`), re-run.
-- `ok: false` after ping → show the error; fix config and re-run.
+This is stdlib-only and checks the OpenAI-compatible LLM configuration. If
+`llm_key_set: false`, ask for the key/model and save them to `~/.llm_env`:
 
-### 1. Resolve the two inputs (auto)
-
-```bash
-python3 scripts/resolve_inputs.py --scene <scene.srt> --audio <audio.srt> --title "<Title>" > .work/inputs.json
+```text
+LLM_API_BASE=https://openrouter.ai/api/v1
+LLM_API_KEY=...
+LLM_MODEL=...
 ```
 
-- Explicit paths (user-provided / uploaded files, any session), OR
-  auto-discovery: `python3 scripts/resolve_inputs.py --title "<Title>"`
-  scans the current folder and classifies by structure (~1 entry/minute =
-  scene script; many short entries = audio).
-- JSON: `{"scene_srt": "...", "audio_srt": "...", "title": "...",
-  "audio_entries": 39, "language": "zh (Chinese)", ...}`
-- Only one suitable file found → ask the user for the other file.
+Re-run the check until `ok: true`.
 
-### 2. Merge into ID-tagged timeline (auto)
+### 1. Resolve the two SRT inputs
+
+```bash
+mkdir -p .work
+python3 scripts/resolve_inputs.py \
+    --scene "<Movie scene.srt>" \
+    --audio "<Movie audio.srt>" \
+    --title "<Movie>" > .work/inputs.json
+```
+
+The files can come from any session. Auto-discovery is also supported:
+
+```bash
+python3 scripts/resolve_inputs.py --title "<Movie>" > .work/inputs.json
+```
+
+The JSON identifies the scene/audio files, source language, and entry counts.
+If both sibling files were accidentally named `<Movie>.srt`, rename them or
+pass explicit paths before continuing.
+
+### 2. Merge to an ID-tagged timeline
 
 ```bash
 python3 scripts/merge_timeline.py --inputs .work/inputs.json
 ```
 
-Writes `.work/story/`: `movie.json`, `timeline.json`, `chunk_NN.json`
-(10-minute chunks, stable event IDs `E0001...`, original timestamps).
-JSON: chunk count, event counts, duration.
+This writes `.work/story/` with `movie.json`, `timeline.json`, and 10-minute
+`chunk_NN.json` files. Every source event receives an ID. Timestamps remain in
+the timeline; the LLM only returns IDs.
 
-### 3. LLM story pass + assembly (auto)
+### 3. Generate Burmese storyteller narration
 
 ```bash
-python3 scripts/story_srt.py --title "<Title>"
+python3 scripts/story_srt.py \
+    --title "<Movie>" \
+    --out "<Movie> VO.srt"
 ```
 
-Internally, all automatic:
-1. per-chunk LLM calls (10-min chunks; sequential on free-tier keys;
-   resumable via `.work/story/part_NN.json`)
-2. consolidation call — whole-film flow, unified character names, and the
-   **hook** for 0:00–0:10 (replaces the opening)
-3. mechanical assembly — event IDs mapped back to the **original
-   timestamps** (the LLM never typed a time), TTS cleanup, SRT written to
-   `<Title> VO.srt`
-4. verification report (dialogue coverage, fallback lines, hook, duration)
+The script performs:
 
-Useful flags: `--hook-seconds 15`, `--model other-model`, `--force` (redo
-chunks), `--parallel N` (only with paid keys), `--no-consolidate`.
-Long runs: free models can take minutes — wait for the JSON line; don't
-kill it early.
+1. Chunk pass: natural Burmese recap narration, mandatory dialogue coverage,
+   concise/optional scene beats, and timing budgets.
+2. Dialogue repair pass when a model misses a required dialogue ID.
+3. Consolidation pass: consistent character names, smooth flow, selective
+   scene beats, and a Burmese hook that replaces the first 10 seconds.
+4. Mechanical assembly: source IDs map to source anchors; end times are
+   calculated from Burmese text length at the configured TTS speed.
+5. Verification: dialogue coverage, fallback count, scene-only counts,
+   effective CPS, hook fit, and timing violations are printed as JSON and
+   saved to `.work/story/verify.json`.
 
-### 4. Cleanup (auto — mandatory)
+Default timing flags:
+
+```bash
+--cps-min 20 --cps-max 24 --cps-target 21.6 --hook-seconds 10
+```
+
+Use another CPS range only for a different TTS voice. `--language` or
+`--output-language` can override the target label, but Burmese is the default.
+Useful existing flags include `--model`, `--force`, `--parallel`,
+`--max-tokens-chunk`, `--max-tokens-consolidate`, and `--no-consolidate`.
+
+A successful final JSON has `ok: true`, full dialogue coverage, no raw
+fallback lines, and no timing violations. If it returns non-zero, inspect
+`verify.json`; the SRT is left in place so the model output and timing can be
+reviewed before rerunning with `--force` or a stronger model.
+
+### 4. Cleanup
 
 ```bash
 rm -rf .work
 ls
 ```
 
-Only skill folders and the output SRTs may remain (inputs are never
-modified). Verify with `ls`.
+Delete only temporary work. Never modify the input SRTs. Keep the final VO SRT
+and the source SRTs under distinct names.
 
 ### 5. Deliver
 
-Present `<Title> VO.srt`; state title, language, entry count, hook
-present?, dialogue coverage (from the JSON report), and the file path.
+Present `<Title> VO.srt` and report:
+
+- source and output language;
+- entry count and estimated speech seconds;
+- Burmese CPS range/target;
+- dialogue coverage percentage and raw fallback count;
+- hook fit and any scene-only lines skipped for timing.
 
 ## Troubleshooting
 
-- `no movie.json` → step 2 not run (or wrong --work).
-- LLM 401/402/403 → bad key/billing: fix `~/.llm_env`.
-- Repeated 429s on a free key → wait a few minutes and rerun (resume skips
-  finished chunks).
-- High `fallback_lines` in the report → the model struggled on that chunk;
-  rerun with `--force` once; if persistent, try a stronger `--model`.
-- `hook: false` → opening not replaced; rerun `story_srt.py` (parts resume,
-  hook pass retries).
-- Both sibling outputs are named `<Name>.srt` in one workspace → one
-  overwrote the other; rename or pass explicit `--scene/--audio`.
-- Wrong language detected → pass `--language "zh (Chinese)"` to
-  merge_timeline.py.
+- **Missing Burmese dialogue coverage:** inspect `fallback_lines`; rerun with
+  `--force` or a stronger model. Raw fallback lines are marked so no required
+  spoken event disappears silently.
+- **Timing violation / hook too long:** use the report's entry and character
+  counts; rerun with a stronger model or adjust `--cps-target` only when the
+  selected TTS voice truly differs. Do not pad optional scene lines.
+- **LLM 401/402/403:** fix `~/.llm_env` key/billing; do not repeatedly retry.
+- **429/rate limits:** keep `--parallel 1`, wait, and rerun; saved chunks
+  resume automatically unless `--force` is used.
+- **Only one input found:** pass both `--scene` and `--audio` explicitly.
+- **Wrong source language:** pass `--language` to `merge_timeline.py`; this
+  changes source context, while final narration remains Burmese by default.
+- **`hook: false`:** rerun without `--no-consolidate`; the hook is generated
+  during consolidation.
 
 ## Run book
 
 | Step | Command | Produces |
 |---|---|---|
-| 0 deps | `python3 scripts/check_deps.py --ping` | JSON: llm config ok? |
-| 1 inputs | `python3 scripts/resolve_inputs.py ... > .work/inputs.json` | JSON: scene/audio paths + title |
-| 2 timeline | `python3 scripts/merge_timeline.py --inputs .work/inputs.json` | `.work/story/chunk_*.json` |
-| 3 story | `python3 scripts/story_srt.py --title "<Title>"` | `<Title> VO.srt` + JSON report |
-| 4 cleanup | `rm -rf .work && ls` | skill + output SRTs only |
-| 5 deliver | (present the SRT) | — |
+| 0 deps | `python3 scripts/check_deps.py --ping` | LLM config JSON |
+| 1 inputs | `python3 scripts/resolve_inputs.py ... > .work/inputs.json` | input JSON |
+| 2 timeline | `python3 scripts/merge_timeline.py --inputs .work/inputs.json` | event IDs + chunks |
+| 3 story | `python3 scripts/story_srt.py --title ... --out ...` | Burmese VO SRT + verify JSON |
+| 4 cleanup | `rm -rf .work && ls` | clean deliverable area |
+| 5 deliver | present the VO SRT | — |
 
 ## Files
 
-- `scripts/check_deps.py` — deps + LLM config check (+ ping)
-- `scripts/resolve_inputs.py` — locate/classify the two input SRTs
-- `scripts/merge_timeline.py` — merge → event IDs + 10-min chunks
-- `scripts/story_srt.py` — LLM chunk pass + consolidation + mechanical
-  timestamp assembly + verification
-- `scripts/srtutil.py` — shared SRT helpers
-- `references/story-prompt.md` — **the set story prompt** (style, TTS rules,
-  ID rules, hook rules) — editable without touching the script
-- `references/usage-notes.md` — LLM API notes, architecture, limits
-- `requirements.txt` — (none — stdlib only)
+- `scripts/check_deps.py` — dependency/config check and API ping
+- `scripts/resolve_inputs.py` — locate/classify scene and audio SRTs
+- `scripts/merge_timeline.py` — assign event IDs and make chunks
+- `scripts/story_srt.py` — Burmese LLM pass, dialogue repair, consolidation,
+  TTS timing, assembly, and verification
+- `scripts/srtutil.py` — SRT helpers, TTS cleanup, Unicode counting
+- `references/story-prompt.md` — exact Burmese narrator prompt
+- `references/usage-notes.md` — CPS calibration, architecture, and limits

@@ -56,6 +56,8 @@ def main() -> int:
     scene = Path(args.scene).expanduser().resolve() if args.scene else None
     audio = Path(args.audio).expanduser().resolve() if args.audio else None
 
+    scene_e = None
+    audio_e = None
     if scene and audio:
         ok = all(p.is_file() for p in (scene, audio))
         if not ok:

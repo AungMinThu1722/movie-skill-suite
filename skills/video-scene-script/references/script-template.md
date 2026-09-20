@@ -1,69 +1,64 @@
-# Per-Minute Script Text (script.txt) — Format & Style
+# Per-Minute Script Text — Format & Style
 
-`script.txt` (or `script_partN.txt` for delegated part runs) is the ONLY
-thing you write. `make_srt.py` turns it into SRT, so add no numbers or
-timestamps.
+`script.txt` (or `script_partN.txt` in parts mode) is the only text the
+vision analyst writes. `make_srt.py` supplies all numbering and timestamps.
+Do not hand-type SRT timestamps.
 
-## Format — ONE LINE PER SEGMENT (minute)
+## Format
 
-```
-# language: zh
-rainy bus stop at night; red-coat woman checks watch, then walks off
-market street, wide; grey-suit man stops at shuttered shop
-grey-suit man: open-mouth shouting face, points at sign; sign reads "CLOSED"
-```
-
-- **Each non-empty line = exactly one segment entry**, in time order.
-  Keep each entry to a single line (short phrases).
-- Line count must match the segment count in your `manifest.json`
-  (`range` — the frames script prints it too).
-- For delegated part runs: part N's file contains exactly the lines for
-  its segment range — no more, no less.
-- First line is a comment: `# language: <code>`. Blank lines and `#` lines
-  are ignored (use them freely to separate parts while writing).
-
-## Style (phrase-based — NOT subtitles)
-
-- **Short phrases / sentence fragments, present tense**, joined by `;`/`,`.
-  Telegraphic: `market street; grey-suit man stops at shuttered shop`.
-- **1–3 phrases per minute.** Static content = one phrase; do not pad.
-- No "we see / there is / the camera shows". No dialogue, no audio, no
-  music, no invented words.
-- **Facial expressions only when distinctive** (crying, shouting, laughing,
-  glaring, fear, shock, pain) and only as visible fact:
-  `woman's face contorted, sobbing` / `man: wide-eyed shock face`.
-  Never inferred emotion. Neutral face → write nothing.
-- **Characters:** stable short tags, first seen = one identifying detail:
-  `red-coat woman`, `grey-suit man`, `old man with cane`.
-- **Scene changes inside a minute:** `cut to kitchen` / `cut to street`.
-- **On-screen text:** quote verbatim in its original language:
-  `sign reads "CLOSED"`.
-- **Unclear frames:** one hedge phrase (`unclear` / movie-language
-  equivalent) — never guess.
-- Full analysis rules (what to look for per frame): `vision-prompt.md`.
-
-## Language
-
-The movie's **original language** — never the user's language, never mixed
-(except verbatim on-screen text). Ambiguous → ask the user once before
-writing.
-
-## Examples (English movie → English phrases, one line per minute)
-
-```
+```text
 # language: en
-rainy bus stop, night; red-coat woman checks watch, then starts walking
-market street, wide; grey-suit man walks against crowd, stops at shuttered shop
-grey-suit man: open-mouth shouting face, points at shop sign; sign reads "CLOSED"
-cut to kitchen; red-coat woman pours tea, face neutral
+rainy bus stop at night; red-coat woman checks her watch, then walks away
+market street; grey-suit man stops at a shuttered shop, a cut to the alley
+red-coat woman crosses the empty yard; grey-suit man watches from a doorway
 ```
 
-## Examples (Chinese movie → Chinese phrases, one line per minute)
+- The first line is `# language: <movie-original-language-code>`.
+- Each non-empty, non-comment line is exactly one 60-second manifest segment,
+  in order. The count must equal the manifest segment count/range.
+- Keep each entry on one line. Use short present-tense phrases joined with
+  semicolons or commas.
 
+## Plot-aware style
+
+Dialogue context gives the **WHY**; frames give the visible **WHO, WHERE, and
+WHAT CHANGES**. Write a compact plot-aware beat, not an object list:
+
+- Normal minutes: 1–3 phrases.
+- Dialogue-free gap minutes: richer entries, up to 4–5 phrases when the
+  denser `gap-uniform`/`gap-scene` frames show meaningful wordless action.
+- Keep a stable clothing/appearance tag until dialogue makes a real name
+  confident. Do not force a name onto an ambiguous face.
+- A `scene` reason supports a visible `cut to ...`; it does not prove all
+  unseen action between samples.
+- A short verbatim quote is allowed only when a readable subtitle is the
+  minute's key beat. The audio SRT already carries the full dialogue, so do
+  not copy whole subtitle lines into visual entries.
+- Hedge unclear or inferred material (`appears to`, `unclear`, or the
+  equivalent in the movie's language).
+
+## Hard rules
+
+- Original movie language, never the user's language; readable on-screen text
+  may remain verbatim in its original language.
+- No `we see`, `there is`, `the camera shows`, audio/music claims, invented
+  speech, unseen motives, or exact events that the frames cannot establish.
+- Mention facial expressions only when distinctive and visibly factual:
+  crying, shouting, laughing, glaring, fear, shock, pain, or exhaustion.
+  Omit neutral or too-small faces.
+- `dialogue.txt` is context, not a script to copy. Keep visual evidence and
+  spoken/plot meaning distinct.
+
+## Examples
+
+```text
+# language: en
+rainy bus stop, night; red-coat woman checks her watch
+cut to the market street; grey-suit man stops at a shuttered shop
+red-coat woman crosses the yard with a bag; man watches from the doorway
+empty road after dark; red-coat woman runs, face visibly fearful; unclear what she carries
 ```
-# language: zh
-雨夜公交站；红大衣女子看表，开始走动
-集市大街，远景；灰西装男子逆行，停在关门的店前
-灰西装男子：张口大喊的表情，指向店招牌；招牌写着"CLOSED"
-切到厨房；红大衣女子倒茶，表情平静
-```
+
+For a static minute, one precise phrase is better than padding. For a gap
+minute, use the extra density to connect visible actions into the film's
+wordless story without inventing what is not shown.
