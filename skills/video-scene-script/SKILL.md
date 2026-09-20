@@ -1,261 +1,260 @@
 ---
 name: video-scene-script
-description: Convert a movie/video (YouTube link, RedNote/Xiaohongshu link incl. xhslink short links, other URLs, or local file) into a minute-by-minute visual script saved as "<Movie Name>.srt", written in the movie's original language as terse phrase entries (distinctive facial expressions noted only when they stand out). Auto-checks/installs dependencies (ffmpeg, yt-dlp), downloads the video, and samples individual full-width frames (2 per minute); videos LONGER than 15 minutes are auto-split into per-part frame folders and delegated to sub-agents (ready-made prompt brief in references/subagent-brief.md), then merged. The LLM's ONLY jobs are looking at the frames ONE BY ONE (vision, per references/vision-prompt.md) and writing the per-minute phrase text. All intermediate files are cleaned up afterwards. Use when the user provides a video or video link and wants a scene script / visual screenplay / per-minute description as an SRT file.
+description: Convert a movie/video (YouTube, RedNote/Xiaohongshu, direct URL, or local file) into an original-language minute-by-minute visual SRT. Uses scene-aware and dialogue-aware frame sampling: hard-cut frames, dialogue-free gap densification, 16x16 thumbnail deduplication, and automatic >15-minute sub-agent parts. Review individual frames one by one and write plot-aware phrase entries; do not invent dialogue or hand-type timestamps.
 ---
 
 # Video Scene Script (SRT)
 
-Turn a movie into a **minute-by-minute visual script** as an SRT file named
-`<Movie Name>.srt`, written in **the movie's original language**.
+Turn a movie into a **minute-by-minute visual script** named
+`<Movie Name>.srt`, written in the movie's **original language**. The visual
+pass is scene-aware and, when an audio SRT is available, dialogue-aware:
+normal minutes get a baseline frame, hard cuts get additional evidence, and
+long dialogue-free minutes get denser sampling for wordless storytelling.
 
-Supported sources: **YouTube** links, **RedNote / Xiaohongshu (RED)** notes
-(including `xhslink.com` short links), direct video URLs, and local files.
+Supported sources: YouTube, RedNote/Xiaohongshu (including `xhslink.com`),
+direct video URLs, and local files.
 
-## Session start — dependency auto-check (MANDATORY FIRST STEP)
+## Division of labor — important
 
-Tools may be wiped between sessions, so before ANYTHING else:
+The agent does only two things:
+
+1. Read the manifest/dialogue context and look at every extracted frame
+   **one by one**, following `references/vision-prompt.md`.
+2. Write one plot-aware phrase line per minute into a script text file.
+
+The scripts do downloading, ffprobe metadata, scene detection, SRT parsing,
+frame sampling, thumbnail deduplication, JPEG extraction, part planning, SRT
+formatting, merging, and cleanup. Never hand-type SRT timestamps or make a
+contact sheet for the visual pass.
+
+For videos longer than 15 minutes, delegate every part to a sub-agent using
+`references/subagent-brief.md`; the parent must not view those part frames.
+
+## Pipeline (run in order)
+
+Work directory: `.work` in the current folder. Final output:
+`<Movie Name>.srt` in the current folder.
+
+### 0. Dependency check (mandatory first step)
 
 ```bash
 python3 scripts/check_deps.py
 ```
 
-It checks and auto-installs **ffmpeg/ffprobe** (static build → `~/.local/`)
-and **yt-dlp** (pip). Read its JSON output:
-- `path_add` → prepend to PATH for all later commands:
-  `export PATH="$PATH:<path_add>"`
-- `ok: false` → tell the user what failed before continuing.
+Read its JSON. If `path_add` is present, prepend that directory to `PATH`.
+If `ok: false`, stop and report the error. This repairs ffmpeg/ffprobe and
+yt-dlp after a new session.
 
-## Division of labor — IMPORTANT
-
-The LLM does exactly **two** things:
-
-1. **Look** at the frame images **one by one** (vision) — following
-   `references/vision-prompt.md`, the set vision prompt for the analysis.
-2. **Write** the per-minute phrase text into `script.txt` /
-   `script_partN.txt`.
-
-Everything else — downloading the video, sampling frames, splitting parts,
-SRT formatting/timestamps, chunk merging, cleanup — is done by the scripts
-below via exact commands. **Never** hand-type SRT timestamps, hand-extract
-frames, or leave intermediate files behind.
-
-For videos **over 15 minutes**, do NOT view the frames in the main agent —
-delegate each part folder to a sub-agent (step 2b).
-
-## Pipeline (run the steps in order)
-
-Work directory: `.work` inside the current folder (create it; it is deleted
-at the end). Final output: `<Movie Name>.srt` in the current folder.
-
-### 1. Resolve the input (auto)
+### 1. Resolve the video
 
 ```bash
 python3 scripts/fetch_video.py "<url or local file>" --work-dir .work
 ```
 
-Prints one JSON line:
-`{"source": ..., "video": "/abs/video.mp4", "title": "Movie Name", "slug": ..., "downloaded": true/false}`
+The script prints JSON with `video`, `title`, and `slug`.
 
-- URL → downloaded automatically. **RedNote / Xiaohongshu** notes
-  (xiaohongshu.com, xhslink.com short links) use the built-in XHS extractor
-  in `fetch_video.py` (resolves short links, reads the note page state with
-  a mobile UA, downloads the stream CDN URL with size verification + backup
-  URLs — works anonymously for public notes). All other URLs go through
-  yt-dlp (installed via pip if missing).
-- Local file → used in place. **Never delete or modify the user's original
-  file** at any point in the pipeline.
-- If the user gave no input at all, ask for the video URL or file first.
-- If an XHS note fails with a login/captcha wall, ask the user for a
-  Netscape-format `cookies.txt` (exported from their logged-in browser) and
-  rerun step 1 with `--cookies /path/to/cookies.txt`.
+- URL input is downloaded automatically. XHS public notes use the built-in
+  extractor; a login/captcha wall requires a Netscape `cookies.txt`.
+- A local file is used in place and is never deleted or modified.
+- If the user gave no input, ask for a URL or file first.
 
-### 2. Sample frames (auto — splits long videos itself)
+### 1b. Dialogue track — recommended before frames
+
+For the full pipeline, run the separate **audio-srt** skill on the same
+video first. It uses AssemblyAI and produces an original-language SRT with
+original timestamps. Keep the video and that SRT, then pass the SRT to the
+frame stage:
 
 ```bash
-python3 scripts/make_frames.py <video from step 1> --out-dir .work/frames
+python3 skills/audio-srt/scripts/check_deps.py
+# run the audio-srt fetch/transcribe steps, retaining its SRT
 ```
 
-One run always covers the **whole video**. The script probes the duration
-and decides the layout itself:
-
-- **≤ 15 min → SINGLE mode:** `.work/frames/` gets `manifest.json` +
-  `frame_0001_00m00s.jpg …` (2 frames/min, every 30 s, full-width JPEGs,
-  exact timestamps inside the manifest).
-- **> 15 min → PARTS mode:** `.work/frames/part1/`, `part2/`, … — one
-  folder per ≤ 15-minute stretch of film, each with its own
-  `manifest.json` and frames, plus `.work/frames/parts.json` (the plan:
-  part → folder, segment range, frame count).
-
-The script's last stdout line is `PLAN: {…}` — parse it (or read
-`parts.json`) to drive step 2b. Options (rarely needed):
-`--frames-per-minute 3` for denser sampling, `--frame-width 1280` when
-on-screen text is too small to read.
-
-### 2b. Plan the run: single or sub-agent delegation
-
-From the PLAN JSON:
-
-- **`mode: "single"` (≤ 15 min):** run steps 3–5 yourself — no delegation.
-- **`mode: "parts"` (> 15 min):** **delegate every part to a sub-agent /
-  background task.** Do not view the frames in the main agent.
-
-  1. `mkdir -p .work/parts`
-  2. Read `references/subagent-brief.md` and dispatch **one task per
-     part**, copying its brief template with the placeholders filled:
-     movie title, part N of M, frames dir (the part folder),
-     segment range, language code (if already known), the part's
-     `.work/script_partN.txt` path, and the output `.work/parts/partN.srt`.
-     The brief tells the sub-agent to follow `references/vision-prompt.md`,
-     view its frames one by one, write its text file, and build its part
-     SRT with `make_srt.py`.
-  3. Briefs are independent — run the tasks **in parallel, as background
-     tasks, or sequentially, whichever your environment supports.**
-  4. When every part reports back, continue at step 5 (merge).
-
-### 3. Look at the frames (LLM — vision only)
-
-**First read `references/vision-prompt.md` and follow it exactly** — it is
-the complete set vision prompt (per-frame viewing, cast list,
-facial-expression rule: only distinctive ones, phrase output style,
-self-check).
-
-Open the part's `manifest.json` (or `.work/frames/manifest.json` in single
-mode), then **view every frame image ONE AT A TIME, in time order** — no
-grids, no batching multiple images into one visual. After each minute's
-frames, write that minute's phrase line; keep the running cast list from
-the vision prompt so naming stays consistent.
-(Extra guidance: `references/workflow-notes.md`.)
-
-In delegated runs, this step happens inside each sub-agent, not here.
-
-### 4. Write the script text (LLM — writing only)
-
-Determine **the movie's original language**:
-- from on-screen text (title cards, opening/closing credits, burned-in
-  subtitles, signs, UI text),
-- otherwise from strong visual/cultural cues,
-- if genuinely ambiguous → **ask the user**, then continue.
-
-Write the phrase entries: **ONE terse phrase line per minute, in time
-order** (one line = one 60 s segment; `#` header line first), in the
-movie's original language (not the user's language, not mixed). First
-line: `# language: <code>`.
-
-- Single run → `.work/script.txt` (all segments).
-- Part N (delegated) → `.work/script_partN.txt` (exactly segments A–B,
-  nothing else).
-
-Style: phrases, not subtitle sentences; distinctive facial expressions only
-when they stand out; no audio, no invented dialogue.
-Rules and examples: `references/script-template.md`.
-
-### 5. Build the SRT (auto)
-
-Single run:
+No AssemblyAI key or no `audio-srt` skill? Skip this step. The visual skill
+still works standalone in pure-visual mode. When an SRT exists:
 
 ```bash
-python3 scripts/make_srt.py .work/frames/manifest.json .work/script.txt --out "<Title>.srt"
+python3 scripts/make_frames.py <video> --out-dir .work/frames \
+    --audio-srt ".work/<Movie Name>.srt"
 ```
 
-Delegated part N (this command runs INSIDE the sub-agent; shown for
-reference):
+The SRT is context only: each part receives a `dialogue.txt` with cues
+overlapping its range, and the sampler marks long dialogue-free windows.
+
+### 2. Scene-aware and dialogue-aware frame sampling
 
 ```bash
-python3 scripts/make_srt.py <part folder>/manifest.json .work/script_partN.txt --out .work/parts/partN.srt
+python3 scripts/make_frames.py <video> --out-dir .work/frames \
+    --audio-srt ".work/<Movie Name>.srt"
 ```
 
-The script zips each phrase entry with its segment's exact timestamps —
-part entries already carry absolute film time. If it warns about a
-phrase/segment count mismatch, fix the text file and rerun — do not
-hand-edit the .srt. Use `--bom` if the language is CJK or another script
-some players mishandle without a BOM.
+Omit `--audio-srt` for pure visual mode. The script probes the video, makes
+one ffmpeg scene-detection pass, parses dialogue gaps, selects candidates,
+deduplicates 16x16 grayscale thumbnails, and extracts the kept frames.
+Its **last stdout line is `PLAN: {json}`**, identical in shape to
+`.work/frames/parts.json`.
 
-**Merge (delegated runs only), after EVERY part SRT exists:** parent
-verifies each `.work/parts/partN.srt` is present and non-empty (and each
-sub-agent's reported `entries` matches its segment count — re-dispatch a
-failed part with the same brief if not), then:
+Sampling defaults:
+
+- Scene mode: one mid-minute `uniform` frame plus up to two `scene` cut
+  frames per normal minute.
+- A minute whose midpoint is inside a dialogue-free window of at least 45 s
+  gets four `gap-uniform` slot-center frames plus eligible `gap-scene` cut
+  frames, capped at six total.
+- Near-identical frames are dropped, but every minute keeps at least one;
+  progress reports forced empty-minute keeps and dropped near-duplicates.
+- Frames are scaled to a 960-pixel long edge by default, never upscaled, and
+  use even dimensions.
+- Videos longer than 15 minutes enter parts mode. Part `k` covers manifest
+  segments `((k-1)*15+1)` through `min(k*15,total)`, with a global frame
+  counter across part folders.
+
+Useful flags:
+
+| Flag | Meaning |
+|---|---|
+| `--no-scene` | Disable scene detection and use uniform fallback sampling |
+| `--frames-per-minute 1..6` | Uniform fallback count; valid only with `--no-scene` |
+| `--uniform-per-minute N` | Normal-minute uniform count in scene mode |
+| `--scene-per-minute N` | Maximum hard-cut frames per minute |
+| `--scene-threshold 0.20` | ffmpeg scene threshold |
+| `--gap-min-seconds 45` | Dialogue-free interval required for gap mode |
+| `--gap-uniform 4` | Gap-minute slot-center uniform count |
+| `--gap-max-per-minute 6` | Hard gap-minute frame cap |
+| `--keep-duplicates` | Disable thumbnail deduplication |
+| `--frame-width 960` | Never-upscaled long-edge target |
+| `--part-minutes 15` | Part-folder threshold and size |
+
+Outputs are `video_info.json`, `parts.json`, and either a single
+`manifest.json`/frame set or `partN/manifest.json`/frame sets. With an audio
+SRT, every folder also has `dialogue.txt` in `[m:ss-m:ss] text` form.
+Manifests record `reason`, `gap`, and `dialogue_lines` for every segment.
+
+### 2b. Plan delegation
+
+Read `parts.json` before viewing anything:
+
+- `mode: "single"`: continue yourself.
+- `mode: "parts"`: create `.work/parts/`, fill one brief per part from
+  `references/subagent-brief.md`, and dispatch every part. The brief now
+  includes the part's dialogue file and `gaps_inside` windows. Do not view
+  part frames in the parent agent.
+
+### 3. Read context, then view frames
+
+Read `references/vision-prompt.md` first. In either a single run or a worker:
+
+1. Read `manifest.json`, including range, reasons, gap flags, and dialogue
+   line counts.
+2. Read `dialogue.txt` **before the first frame** when it exists. Keep a
+   running story summary; use dialogue for plot context, not as a transcript
+   to copy.
+3. View every frame one at a time in time order. Note `uniform`, `scene`,
+   `gap-uniform`, and `gap-scene` reasons. Gap minutes are real wordless
+   sequences and deserve richer entries when the frames show them.
+
+### 4. Write the visual script text
+
+Determine the movie's original language from title cards, credits, signs, and
+subtitle context. If genuinely ambiguous, ask the user once. Write exactly
+one non-comment line per manifest segment, in that language:
+
+- 1–3 plot-aware phrases in normal minutes;
+- up to 4–5 phrases in a meaningful gap minute;
+- stable clothing tags first; attach real names only when dialogue context
+  makes the identity confident;
+- visual facts from frames, plot/word meaning from dialogue context and
+  readable burned-in subtitles;
+- never copy whole subtitle lines, invent speech, or describe audio.
+
+Single mode: `.work/script.txt`. Part N: `.work/script_partN.txt`.
+Use `references/script-template.md` for exact phrase style.
+
+### 5. Build or merge the SRT
+
+Single mode:
 
 ```bash
-python3 scripts/merge_srt.py .work/parts/part1.srt .work/parts/part2.srt ... --out "<Title>.srt"
+python3 scripts/make_srt.py .work/frames/manifest.json \
+    .work/script.txt --out "<Title>.srt"
 ```
 
-Renumbering is automatic; it warns about timeline gaps/overlaps — re-check
-that part's frames if a warning appears.
+Parts are built by their workers:
 
-### 6. Cleanup (auto — mandatory)
+```bash
+python3 scripts/make_srt.py <part-folder>/manifest.json \
+    .work/script_partN.txt --out .work/parts/partN.srt
+```
+
+If the line count is wrong, fix the text file and rerun. Never hand-edit the
+SRT. After every part exists and has the expected segment count, the parent
+runs:
+
+```bash
+python3 scripts/merge_srt.py .work/parts/part1.srt \
+    .work/parts/part2.srt ... --out "<Title>.srt"
+```
+
+### 6. Cleanup
 
 ```bash
 rm -rf .work
 ls
 ```
 
-After this, **only the skill folder and `<Movie Name>.srt` may remain** in
-the working area (plus whatever the user already had there — never delete
-user files such as their original video). Verify with `ls` before delivering.
+Only the final SRT, skill folder, and pre-existing user files should remain.
+Never delete a local input video.
 
 ### 7. Deliver
 
-Present the `.srt` file to the user, state the movie title and the language
-the script was written in, and show the first 1–2 entries inline as a
-preview.
+Present the final `.srt`, state the movie title and original language, give
+the entry count, and show a one- or two-entry preview.
 
 ## Troubleshooting
 
-- XHS note fails ("login/captcha wall", "no video stream", download failed
-  on all URLs) → ask the user for `cookies.txt` and retry with `--cookies`;
-  short-link tokens also expire, so use the link the user just sent.
-- `yt-dlp download failed` — URL may need login or be region-locked; ask for
-  cookies (with `--cookies`), a direct file, or another source.
-- Tools missing after a session restart → rerun `scripts/check_deps.py`
-  (step 0); it re-downloads the ffmpeg static build and pip-installs
-  yt-dlp automatically.
-- A frame is missing / `WARNING: no frame at …` → the seek landed past the
-  end of a very short final segment; harmless if the manifest's frame list
-  for that minute is not empty.
-- On-screen text unreadable at 960 px → re-extract that instant full-size:
-  `ffmpeg -ss <t> -i <video> -frames:v 1 .work/zoom.png`
-- Very long movie (> 1 h) → parts mode handles it automatically (e.g.
-  60 min = 4 part folders × ~30 frames = 4 sub-agent tasks, merged at the
-  end). If sampling feels too sparse for a fast-cut film, re-run
-  `make_frames.py` with `--frames-per-minute 3`.
-- A sub-agent fails or its entry count ≠ its segment count → re-dispatch
-  just that part with the same brief from `references/subagent-brief.md`.
-- `merge_srt.py` reports a gap/overlap → that part's range was mis-set;
-  re-run that part (frames carry global minute numbers, so a re-extract is
-  never needed).
-- Audio is not analyzed — this skill is visual only; say so if the user
-  expects dialogue transcription.
+- **Tools missing:** rerun `scripts/check_deps.py` and prepend its
+  `path_add` value. Some minimal ffmpeg builds need an ffprobe shim for
+  testing; real installations should provide both tools.
+- **Dialogue SRT missing:** omit `--audio-srt`; the script remains pure
+  visual and writes no `dialogue.txt` or gap windows.
+- **Sparse fast-cut film:** use `--scene-per-minute 3` or
+  `--scene-threshold 0.15`; do **not** use `--frames-per-minute 3` unless
+  you deliberately choose `--no-scene` fallback mode.
+- **Unreadable on-screen text:** extract a full-size zoom at its manifest
+  timestamp with `ffmpeg -ss <t> -i <video> -frames:v 1 .work/zoom.png`.
+- **Missing frame near the end:** a seek can land past a very short final
+  segment; inspect the manifest and rerun with a valid source if a whole
+  minute is empty.
+- **Worker failure or wrong entry count:** redispatch only that part with
+  the same brief; do not merge partial output.
+- **Merge gap/overlap warning:** verify part order and segment ranges before
+  rerunning the affected worker.
+- **XHS/YouTube access wall:** retry with the user's Netscape cookies file or
+  ask for a direct/local video.
 
-## Run book — which script, when, on what
+## Run book
 
-| Step | Command | On what | Produces |
-|---|---|---|---|
-| 0 deps | `python3 scripts/check_deps.py` | always first | JSON (versions, `path_add`, `installed`) |
-| 1 fetch | `python3 scripts/fetch_video.py "<input>" --work-dir .work [--cookies f]` | user's URL/file | JSON: `video` path + real `title` |
-| 2 frames | `python3 scripts/make_frames.py <video> --out-dir .work/frames` | fetched video (whole, one run) | `PLAN` JSON, `parts.json`, frame folders + `manifest.json` (auto part split if > 15 min) |
-| 2b plan | read PLAN / `parts.json` | — | single → steps 3–5 here; parts → dispatch sub-agents per `references/subagent-brief.md` |
-| 3–4 vision+write | (LLM) view frames one by one → write `.work/script[_partN].txt` | frame images + manifest | phrase entries, movie's language |
-| 5 srt | `python3 scripts/make_srt.py <manifest> <script.txt> --out <out.srt>` | that run's manifest + text | `.srt` (whole or `.work/parts/partN.srt`) |
-| 5b merge | `python3 scripts/merge_srt.py .work/parts/*.srt --out "<Title>.srt"` | all part files (delegated runs) | final `<Title>.srt` |
-| 6 cleanup | `rm -rf .work && ls` | work dir | only skill + `<Title>.srt` remain |
-
-Every command prints what it did (video name, ranges, counts, output
-paths) — read each output line before moving to the next step.
+| Step | Command/action | Produces |
+|---|---|---|
+| 0 deps | `python3 scripts/check_deps.py` | tool/version JSON |
+| 1 fetch | `python3 scripts/fetch_video.py "<input>" --work-dir .work` | video/title JSON |
+| 1b audio | run `audio-srt` first when key/skill are available | original-language dialogue SRT |
+| 2 frames | `python3 scripts/make_frames.py <video> --out-dir .work/frames [--audio-srt file]` | scene/gap frames, manifests, PLAN |
+| 2b plan | read `parts.json`; dispatch brief in parts mode | one worker per part |
+| 3–4 vision+write | read dialogue.txt → view frames → write one line/minute | script text |
+| 5 SRT | `python3 scripts/make_srt.py <manifest> <script.txt> --out <out.srt>` | single/part SRT |
+| 5b merge | `python3 scripts/merge_srt.py .work/parts/*.srt --out <out.srt>` | final parts SRT |
+| 6 cleanup | `rm -rf .work && ls` | clean deliverable area |
 
 ## Files
 
-- `scripts/check_deps.py` — auto-check/install ffmpeg, yt-dlp (run first)
-- `scripts/fetch_video.py` — resolve URL/local input (auto-download, `--cookies` for XHS)
-- `scripts/make_frames.py` — individual full-width frames, 2/min, exact
-  timestamps in the manifest; auto-splits videos > 15 min into per-part
-  folders + `parts.json` plan
-- `scripts/make_srt.py` — phrase text + manifest → .srt (whole or part)
-- `scripts/merge_srt.py` — merge part .srt files → final (renumbers, checks timeline)
-- `references/vision-prompt.md` — **the set vision prompt** (per-frame
-  analysis rules, facial-expression rule, phrase style)
-- `references/subagent-brief.md` — the ready-made brief for delegating one
-  part to a sub-agent/background task (videos > 15 min)
-- `references/script-template.md` — text format, phrase style, language rules
-- `references/workflow-notes.md` — frame-reading guide, delegation run book, cleanup
-- `examples/demo-script.srt` — sample output
-- `requirements.txt` — Python deps (ffmpeg is a system dependency)
+- `scripts/check_deps.py` — dependency repair
+- `scripts/fetch_video.py` — URL/local input resolver
+- `scripts/make_frames.py` — scene-aware sampling, dialogue gaps, dedup,
+  parts, manifests, and PLAN
+- `scripts/make_srt.py` — manifest + phrase text → SRT
+- `scripts/merge_srt.py` — chronological part-SRT merge
+- `references/vision-prompt.md` — complete one-frame-at-a-time prompt
+- `references/subagent-brief.md` — part worker prompt and parent checklist
+- `references/script-template.md` — plot-aware line format/style
+- `references/workflow-notes.md` — sampling and delegation run book

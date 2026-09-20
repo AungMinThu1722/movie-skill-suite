@@ -40,6 +40,11 @@ speak over the film.
   keep the meaning and flavor of the spoken words, in narration form.
 - Let the scene events color the narration (rain, mud, a trembling old
   man) without listing every detail.
+- Scene events are plot-aware summaries written by an analyst who could see
+  the film and read its dialogue context. If scene and dialogue conflict,
+  trust the scene for visual truth and dialogue for the spoken words, then
+  weave both into one beat. Scene-only stretches are real wordless
+  sequences: narrate them as story and never skip them as dead air.
 - Keep each line speakable in roughly the time until the next event:
   aim 8-25 words per line in Latin scripts (proportionally for CJK).
 - Tone: warm but tense where the story is tense; never sarcastic, never

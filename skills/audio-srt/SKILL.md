@@ -11,6 +11,12 @@ the AssemblyAI API, with zero LLM rewriting.
 
 > Separate skill: do not mix with `video-scene-script` (that one is
 > vision-based scene scripting; this one is audio transcription).
+>
+> **Position in the suite:** run THIS skill before `video-scene-script` when
+> doing the full pipeline. Its original-language SRT feeds
+> `make_frames.py --audio-srt`, providing dialogue context and denser
+> sampling of dialogue-free gaps. With no AssemblyAI key, the visual skill
+> still works standalone without a dialogue track.
 
 ## Agent role — run scripts only
 
